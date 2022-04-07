@@ -4,7 +4,6 @@ from gym.utils import seeding
 from gym.envs.registration import EnvSpec
 import enum
 import numpy as np
-
 from . import data
 
 DEFAULT_BARS_COUNT = 10
@@ -32,6 +31,47 @@ class State:
         self.reset_on_close = reset_on_close
         self.reward_on_close = reward_on_close
         self.volumes = volumes
+
+    def reset(self, prices, offset):
+        assert isinstance(prices, data.Prices)
+        assert offset >= self.bars_count - 1
+        self.have_position = False
+        self.open_price = 0.0
+        self._prices = prices
+        self._offset = offset
+
+    @property
+    def shape(self):
+        # [h, l, c] * bars + position_flag + rel_profit
+        if self.volumes:
+            return 4 * self.bars_count + 1 + 1,
+        else:
+            return 3 * self.bars_count + 1 + 1,
+
+    def encode(self):
+        """
+        Convert current state into numpy array.
+        """
+        res = np.ndarray(shape=self.shape, dtype=np.float32)
+        shift = 0
+        for bar_idx in range(-self.bars_count + 1, 1):
+            ofs = self._offset + bar_idx
+            res[shift] = self._prices.high[ofs]
+            shift += 1
+            res[shift] = self._prices.low[ofs]
+            shift += 1
+            res[shift] = self._prices.close[ofs]
+            shift += 1
+            if self.volumes:
+                res[shift] = self._prices.volume[ofs]
+                shift += 1
+        res[shift] = float(self.have_position)
+        shift += 1
+        if not self.have_position:
+            res[shift] = 0.0
+        else:
+            res[shift] = self._cur_close() / self.open_price - 1.0
+        return res
 
 
 class State1D:
@@ -95,6 +135,10 @@ class StocksEnv(gym.Env):
     def close(self):
         pass
 
+    def seed(self, seed=None):
+        self.np_random, seed1 = seeding.np_random(seed)
+        seed2 = seeding.hash_seed(seed1 + 1) % 2 ** 31
+        return [seed1, seed2]
 
     @classmethod
     def from_dir(cls, data_dir, **kwargs):
