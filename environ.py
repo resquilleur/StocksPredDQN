@@ -32,3 +32,74 @@ class State:
         self.reset_on_close = reset_on_close
         self.reward_on_close = reward_on_close
         self.volumes = volumes
+
+
+class State1D:
+
+
+class StocksEnv(gym.Env):
+    metadata = {'render.modes': ['human']}
+    spec = EnvSpec("StocksEnv-v0")
+
+    def __init__(self, prices, bars_count=DEFAULT_BARS_COUNT,
+                 comission=DEFAULT_COMMISSION_PERC,
+                 reset_on_close=True, state_1d=False,
+                 random_ofs_on_reset=True, reward_on_close=False,
+                 volumes=False):
+        assert isinstance(prices, dict)
+        self._prices = prices
+        if state_1d:
+            self._state = State1D(
+                bars_count, comission, reset_on_close,
+                reward_on_close=reward_on_close, volumes=volumes)
+        else:
+            self._state = State(
+                bars_count, comission, reset_on_close,
+                reward_on_close=reward_on_close, volumes=volumes)
+        self.action_space = gym.spaces.Discrete(n=len(Actions))
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf, high=np.inf,
+            shape=self._state.shape, dtype=np.float32
+        )
+        self.random_ofs_on_reset = random_ofs_on_reset
+        self.seed()
+
+
+    def reset(self):
+        self._instrument = self.np_random.choice(
+            list(self._prices.keys())
+        )
+        prices = self._prices[self._instrument]
+        bars = self._state.bars_count
+        if self.random_ofs_on_reset:
+            offset = self.np_random.choice(
+                prices.high.shape[0] - bars*10) + bars
+        else:
+            offset = bars
+        self._state.reset(prices, offset)
+        return  self._state.encode()
+
+    def step(self, action_idx):
+        action = Actions(action_idx)
+        reward, done = self._state.step(action)
+        obs = self._state.encode()
+        info = {
+            "instrument": self._instrument,
+            "offset": self._state._offset
+        }
+        return obs, reward, done, info
+
+    def render(self, mode='human', close=False):
+        pass
+
+    def close(self):
+        pass
+
+
+    @classmethod
+    def from_dir(cls, data_dir, **kwargs):
+        prices = {
+            file: data.load_relative(file)
+            for file in data.price_files(data_dir)
+        }
+        return StocksEnv(prices, **kwargs)
